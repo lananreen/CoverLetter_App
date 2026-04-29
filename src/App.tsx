@@ -21,7 +21,6 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import { cn } from './lib/utils';
 import { generateCoverLetter, refineCoverLetter } from './services/gemini';
 import { UserInfo, JobInfo, CoverLetterDraft, Theme, Template } from './types';
@@ -80,6 +79,7 @@ export default function App() {
   const [drafts, setDrafts] = useState<CoverLetterDraft[]>([]);
   const [currentDraft, setCurrentDraft] = useState<CoverLetterDraft | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [refinementText, setRefinementText] = useState('');
   const [theme, setTheme] = useState<Theme>('natural');
   const previewRef = useRef<HTMLDivElement>(null);
@@ -151,15 +151,47 @@ export default function App() {
   };
 
   const handleDownloadPDF = async () => {
-    if (!previewRef.current) return;
-    const canvas = await html2canvas(previewRef.current);
-    const imgData = canvas.toDataURL('image/png');
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const imgProps = pdf.getImageProperties(imgData);
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-    pdf.save(`Cover_Letter_${jobInfo.companyName.replace(/\s/g, '_')}.pdf`);
+    if (!currentDraft || isDownloading) return;
+    
+    setIsDownloading(true);
+    try {
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const margin = 25.4; // Standard 1 inch margin
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const maxWidth = pageWidth - (margin * 2);
+      
+      // Set standard letter font
+      doc.setFont("times", "normal");
+      doc.setFontSize(11); // Standard business letter font size
+      
+      // Split the content into lines that fit the page width
+      // Replace newlines with spaces for splitTextToSize or handle specifically
+      const lines = currentDraft.content.split('\n');
+      let cursorY = margin;
+      const lineHeight = 6;
+      const pageHeight = doc.internal.pageSize.getHeight();
+
+      lines.forEach((p) => {
+        const textLines = doc.splitTextToSize(p || ' ', maxWidth);
+        textLines.forEach((line: string) => {
+          if (cursorY + lineHeight > pageHeight - margin) {
+            doc.addPage();
+            cursorY = margin;
+          }
+          doc.text(line, margin, cursorY);
+          cursorY += lineHeight;
+        });
+        // Add minimal paragraph spacing if not already handled by input
+        if (p === '') cursorY += 2; 
+      });
+      
+      doc.save(`Cover_Letter_${jobInfo.companyName.replace(/\s/g, '_')}.pdf`);
+    } catch (err) {
+      console.error("PDF Export Error:", err);
+      alert("Failed to export PDF. Please try again.");
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   const deleteDraft = (id: string, e: React.MouseEvent) => {
@@ -169,22 +201,13 @@ export default function App() {
   };
 
   const themes: { name: Theme; class: string; label: string }[] = [
-    { name: 'light', class: 'bg-white text-gray-900', label: 'Light' },
     { name: 'dark', class: 'bg-gray-900 text-white', label: 'Dark' },
-    { name: 'sepia', class: 'bg-[#f4ecd8] text-[#5b4636]', label: 'Sepia' },
-    { name: 'professional', class: 'bg-slate-50 text-slate-900 border-t-4 border-blue-600', label: 'Pro' },
     { name: 'natural', class: 'bg-natural text-olive', label: 'Natural' }
   ];
 
   const currentThemeStyles = theme === 'dark' 
     ? 'bg-gray-900 text-gray-100 border-gray-800' 
-    : theme === 'sepia'
-    ? 'bg-[#f4ecd8] text-[#5b4636] border-[#dcd2bb]'
-    : theme === 'professional'
-    ? 'bg-slate-50 text-slate-900 border-slate-200'
-    : theme === 'natural'
-    ? 'bg-natural text-gray-800 border-[#dcd2bb]'
-    : 'bg-white text-gray-900 border-gray-200';
+    : 'bg-natural text-gray-800 border-[#dcd2bb]';
 
   const inputStyles = cn(
     "w-full px-4 py-2 rounded-lg border focus:ring-2 transition-all outline-none",
@@ -242,15 +265,18 @@ export default function App() {
         {/* Sidebar / Drafts */}
         <div className="lg:col-span-3 space-y-6">
           <div className="space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500 flex items-center gap-2">
+            <h2 className={cn(
+              "text-sm font-semibold uppercase tracking-wider flex items-center gap-2",
+              theme === 'natural' ? "text-olive/60" : "text-gray-500"
+            )}>
               <History size={16} /> My Drafts
             </h2>
             <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
               {drafts.length === 0 ? (
-                <p className="text-sm text-gray-400 italic">No drafts saved yet</p>
+                <p className={cn("text-sm italic", theme === 'natural' ? "text-olive/40" : "text-gray-400")}>No drafts saved yet</p>
               ) : (
                 drafts.map((d) => (
-                  <button
+                  <div
                     key={d.id}
                     onClick={() => {
                       setCurrentDraft(d);
@@ -259,21 +285,27 @@ export default function App() {
                       setStep(4);
                     } }
                     className={cn(
-                      "w-full text-left p-3 rounded-xl transition-all border group relative",
+                      "w-full text-left p-3 rounded-xl transition-all border group relative cursor-pointer",
                       currentDraft?.id === d.id
-                        ? "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800"
-                        : "bg-white border-transparent hover:border-gray-200 dark:bg-gray-800 dark:hover:border-gray-700"
+                        ? (theme === 'natural' ? "bg-white border-olive shadow-card text-olive" : "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800")
+                        : (theme === 'natural' ? "bg-white/70 border-white/40 shadow-sm hover:bg-white hover:border-olive/20 text-gray-700" : "bg-white border-transparent hover:border-gray-200 dark:bg-gray-800 dark:hover:border-gray-700")
                     )}
                   >
-                    <div className="font-medium text-sm truncate pr-6">{d.title}</div>
-                    <div className="text-[10px] text-gray-400 mt-1">{new Date(d.createdAt).toLocaleDateString()}</div>
+                    <div className={cn("font-medium text-sm truncate pr-6", theme === 'natural' && currentDraft?.id !== d.id && "text-olive/80")}>{d.title}</div>
+                    <div className={cn("text-[10px] mt-1", theme === 'natural' ? "text-olive/40" : "text-gray-400")}>{new Date(d.createdAt).toLocaleDateString()}</div>
                     <button 
-                      onClick={(e) => deleteDraft(d.id, e)}
-                      className="absolute right-2 top-3 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-all"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteDraft(d.id, e);
+                      }}
+                      className={cn(
+                        "absolute right-2 top-3 opacity-0 group-hover:opacity-100 transition-all p-1 rounded-md",
+                        theme === 'natural' ? "text-olive/40 hover:text-red-500 hover:bg-red-50" : "text-gray-400 hover:text-red-500"
+                      )}
                     >
                       <Trash2 size={14} />
                     </button>
-                  </button>
+                  </div>
                 ))
               )}
             </div>
@@ -339,7 +371,7 @@ export default function App() {
                         <div className="space-y-2">
                           <label className="text-sm font-medium">Phone Number</label>
                           <input 
-                            placeholder="+1 (555) 000-0000" 
+                            placeholder="+63 917 123 4567" 
                             className={inputStyles}
                             value={userInfo.phone}
                             onChange={e => setUserInfo({...userInfo, phone: e.target.value})}
@@ -348,7 +380,7 @@ export default function App() {
                         <div className="space-y-2">
                           <label className="text-sm font-medium">Location</label>
                           <input 
-                            placeholder="New York, NY" 
+                            placeholder="Makati City, Metro Manila" 
                             className={inputStyles}
                             value={userInfo.location}
                             onChange={e => setUserInfo({...userInfo, location: e.target.value})}
@@ -475,8 +507,8 @@ export default function App() {
                             className={cn(
                               "text-left p-6 rounded-2xl border-2 transition-all space-y-2 relative group",
                               selectedTemplate.id === tmpl.id
-                                ? (theme === 'natural' ? "border-olive bg-olive/5" : "border-blue-600 bg-blue-50/50 dark:bg-blue-900/10")
-                                : "border-gray-100 hover:border-gray-200 dark:border-gray-800"
+                                ? (theme === 'natural' ? "border-olive bg-white shadow-card" : "border-blue-600 bg-blue-50/50 dark:bg-blue-900/10")
+                                : (theme === 'natural' ? "border-transparent bg-white/50 hover:border-olive/20 hover:bg-white shadow-sm" : "border-gray-100 hover:border-gray-200 dark:border-gray-800")
                             )}
                           >
                             <div className="flex items-center justify-between">
@@ -519,7 +551,7 @@ export default function App() {
                               isGenerating && "animate-pulse"
                             )}
                           >
-                            {isGenerating ? "Drafting..." : "Generate Magic"} <Send size={18} />
+                            {isGenerating ? "Drafting..." : "Generate Cover Letter"} <Send size={18} />
                           </button>
                         </div>
                       </div>
@@ -545,22 +577,34 @@ export default function App() {
                     <div className="flex gap-2">
                       <button 
                         onClick={() => {
+                          if (isGenerating || isDownloading) return;
                           navigator.clipboard.writeText(currentDraft.content);
                           alert('Copied to clipboard!');
                         }}
-                        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        className={cn(
+                          "p-2 rounded-lg transition-all",
+                          theme === 'natural' 
+                            ? "hover:bg-olive hover:text-white text-olive bg-white/50 shadow-sm" 
+                            : "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"
+                        )}
                         title="Copy text"
                       >
-                        <Copy size={20} className={cn(theme === 'natural' && "text-olive")} />
+                        <Copy size={20} />
                       </button>
                       <button 
                          onClick={handleDownloadPDF}
+                         disabled={isDownloading}
                          className={cn(
-                           "flex items-center gap-2 px-4 py-2 rounded-lg transition-all text-sm font-semibold text-white",
+                           "flex items-center gap-2 px-4 py-2 rounded-lg transition-all text-sm font-semibold text-white disabled:opacity-70 disabled:cursor-not-allowed",
                            theme === 'natural' ? "bg-olive shadow-olive/20 hover:brightness-110" : "bg-blue-600 hover:bg-blue-700"
                          )}
                       >
-                        <Download size={18} /> Download PDF
+                        {isDownloading ? (
+                          <RotateCcw size={18} className="animate-spin" />
+                        ) : (
+                          <Download size={18} />
+                        )}
+                        {isDownloading ? "Processing..." : "Download PDF"}
                       </button>
                     </div>
                   </div>
@@ -568,12 +612,35 @@ export default function App() {
                   <div 
                     ref={previewRef}
                     className={cn(
-                      "p-12 shadow-2xl rounded-sm min-h-[842px] relative",
-                      (theme === 'natural' || theme === 'sepia') ? 'bg-[#fdf9f0] text-[#333]' : 'bg-white text-gray-900',
+                      "p-12 shadow-2xl rounded-sm min-h-[842px] relative text-left transition-opacity",
+                      "bg-white text-gray-900 border border-gray-100", // Force white background in UI preview too for realism
+                      isGenerating && "opacity-50"
                     )}
-                    style={{ fontFamily: theme === 'natural' ? "'Libre Baskerville', serif" : "'Times New Roman', serif" }}
+                    style={{ fontFamily: "'Times New Roman', serif" }}
                   >
-                    <div className="whitespace-pre-wrap leading-[1.6] text-[16px]">
+                    {isGenerating && (
+                      <div className={cn(
+                        "absolute inset-0 flex items-center justify-center bg-white/20 z-10 backdrop-blur-[1px]",
+                        theme === 'natural' ? "bg-[#fdf9f0]/40" : "bg-white/20"
+                      )}>
+                        <div className="flex flex-col items-center gap-3">
+                          <motion.div
+                            animate={{ rotate: -360 }}
+                            transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                          >
+                            <RotateCcw className={cn(
+                              "size-8",
+                              theme === 'natural' ? "text-olive" : "text-blue-600"
+                            )} />
+                          </motion.div>
+                          <span className={cn(
+                            "text-sm font-bold uppercase tracking-widest",
+                            theme === 'natural' ? "text-olive" : "text-blue-600"
+                          )}>Refining...</span>
+                        </div>
+                      </div>
+                    )}
+                    <div className="whitespace-pre-wrap leading-[1.6] text-[16px] text-left">
                       {currentDraft.content}
                     </div>
                   </div>
@@ -585,11 +652,11 @@ export default function App() {
                     "p-6 rounded-2xl space-y-4 shadow-sm",
                     theme === 'natural' 
                       ? "bg-white border border-white/20 shadow-card" 
-                      : "bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30"
+                      : "bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30"
                   )}>
                     <h3 className={cn(
                       "font-bold flex items-center gap-2",
-                      theme === 'natural' ? "text-olive" : "text-amber-800 dark:text-amber-500"
+                      theme === 'natural' ? "text-olive" : "text-blue-700 dark:text-blue-400"
                     )}>
                       <AlertCircle size={18} /> Smart Suggestions
                     </h3>
@@ -597,9 +664,9 @@ export default function App() {
                       {currentDraft.suggestions.map((s, idx) => (
                         <li key={idx} className={cn(
                           "text-sm flex gap-2",
-                          theme === 'natural' ? "text-gray-600" : "text-amber-900/80 dark:text-amber-200/80"
+                          theme === 'natural' ? "text-gray-600" : "text-gray-700 dark:text-gray-300"
                         )}>
-                          <span className={cn("font-bold", theme === 'natural' ? "text-olive" : "text-amber-500")}>•</span>
+                          <span className={cn("font-bold", theme === 'natural' ? "text-olive" : "text-blue-500")}>•</span>
                           {s}
                         </li>
                       ))}
@@ -637,18 +704,6 @@ export default function App() {
                     </div>
                     <div className="text-[10px] text-gray-400 text-center">Press Ctrl + Enter to send</div>
                   </div>
-
-                  <button 
-                    onClick={() => { setStep(1); setCurrentDraft(null); }}
-                    className={cn(
-                      "w-full flex items-center justify-center gap-2 py-4 border-2 border-dashed rounded-2xl transition-all group",
-                      theme === 'natural' 
-                        ? "border-olive/20 text-olive/40 hover:text-olive hover:border-olive/60" 
-                        : "border-gray-200 dark:border-gray-700 text-gray-400 hover:text-blue-600 hover:border-blue-200 dark:hover:border-blue-900"
-                    )}
-                  >
-                    <Plus size={20} className="group-hover:rotate-90 transition-transform" /> Start New Project
-                  </button>
                 </div>
               </motion.div>
             )}
@@ -658,10 +713,6 @@ export default function App() {
 
       {/* Footer */}
       <footer className="max-w-7xl mx-auto px-6 py-10 border-t border-gray-200 dark:border-gray-800 flex flex-col md:flex-row items-center justify-between text-gray-400 text-sm gap-4">
-        <div className="flex items-center gap-4">
-          <button className="hover:text-gray-600 transition-colors">Privacy Policy</button>
-          <button className="hover:text-gray-600 transition-colors">Terms of Service</button>
-        </div>
         <div>Crafted with precision for candidates everywhere.</div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1">

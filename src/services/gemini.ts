@@ -30,9 +30,11 @@ export async function generateCoverLetter(userInfo: UserInfo, jobInfo: JobInfo, 
     INSTRUCTIONS:
     1. Write a professional, effective cover letter that highlights the user's relevant skills and experience for this specific job.
     2. Adapt the language and tone to match the specified "${jobInfo.tone}" style and the company culture: "${jobInfo.companyCulture}".
-    3. Ensure the output is only the cover letter text, properly formatted with standard sections (Header, Date, Greeting, Opening, Body, Closing, Sign-off).
-    4. Focus on value proposition: why the user is the best fit for this role.
-    5. Return the response as a JSON object with the fields: 'content' (the letter text) and 'suggestions' (an array of 3-4 tips to further improve the letter or the user's profile for this role).
+    3. Ensure the output is only the cover letter text, properly formatted with standard sections (Header at the top left, Date, Receiver Greeting, Opening, Body, Closing, Sign-off).
+    4. MUST use double newlines (double spacing) between sections and paragraphs for a clean letter layout.
+    5. Ensure the entire letter is left-aligned.
+    6. Focus on value proposition: why the user is the best fit for this role.
+    7. Return the response as a JSON object with the fields: 'content' (the letter text) and 'suggestions' (an array of 3-4 tips).
   `;
 
   try {

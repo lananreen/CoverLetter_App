@@ -1,4 +1,4 @@
-export type Theme = 'light' | 'dark' | 'sepia' | 'professional' | 'natural';
+export type Theme = 'dark' | 'natural';
 
 export interface UserInfo {
   fullName: string;
