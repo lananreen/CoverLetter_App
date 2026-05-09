@@ -19,12 +19,16 @@ import {
   History,
   Layout,
   FileUp,
-  Loader2
+  Loader2,
+  Link,
+  Flame,
+  Trophy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
+import confetti from 'canvas-confetti';
 import { cn } from './lib/utils';
-import { generateCoverLetter, refineCoverLetter, parseResume } from './services/gemini';
+import { generateCoverLetter, refineCoverLetter, parseResume, parseJobUrl } from './services/gemini';
 import { extractTextFromPDF } from './lib/pdfUtils';
 import { UserInfo, JobInfo, CoverLetterDraft, Theme, Template } from './types';
 
@@ -74,6 +78,12 @@ const INITIAL_JOB_INFO: JobInfo = {
   tone: 'professional'
 };
 
+interface UserStats {
+  streak: number;
+  lastGeneratedDate: string | null;
+  totalGenerated: number;
+}
+
 export default function App() {
   const [step, setStep] = useState(1);
   const [userInfo, setUserInfo] = useState<UserInfo>(INITIAL_USER_INFO);
@@ -84,9 +94,35 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isParsingResume, setIsParsingResume] = useState(false);
+  const [resumeParsed, setResumeParsed] = useState(false);
+  const [jobUrl, setJobUrl] = useState('');
+  const [isParsingJobUrl, setIsParsingJobUrl] = useState(false);
+  const [jobUrlParsed, setJobUrlParsed] = useState(false);
   const [refinementText, setRefinementText] = useState('');
   const [theme, setTheme] = useState<Theme>('natural');
   const previewRef = useRef<HTMLDivElement>(null);
+
+  const [stats, setStats] = useState<UserStats>(() => {
+    const saved = localStorage.getItem('career_craft_stats');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        if (parsed.lastGeneratedDate) {
+          const lastDate = new Date(parsed.lastGeneratedDate);
+          lastDate.setHours(0,0,0,0);
+          const diffTime = Math.abs(today.getTime() - lastDate.getTime());
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+          if (diffDays > 1) {
+            parsed.streak = 0; // reset streak if missed a day
+          }
+        }
+        return parsed;
+      } catch (e) {}
+    }
+    return { streak: 0, lastGeneratedDate: null, totalGenerated: 0 };
+  });
 
   useEffect(() => {
     const savedDrafts = localStorage.getItem('cover_letter_drafts');
@@ -108,6 +144,10 @@ export default function App() {
     document.documentElement.className = theme;
   }, [theme]);
 
+  useEffect(() => {
+    localStorage.setItem('career_craft_stats', JSON.stringify(stats));
+  }, [stats]);
+
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
@@ -125,6 +165,42 @@ export default function App() {
       setDrafts([newDraft, ...drafts]);
       setCurrentDraft(newDraft);
       setStep(4);
+      
+      confetti({
+        particleCount: 150,
+        spread: 80,
+        origin: { y: 0.6 }
+      });
+      
+      setStats(prev => {
+        const todayStr = new Date().toDateString();
+        let newStreak = prev.streak;
+
+        if (prev.lastGeneratedDate !== todayStr) {
+          const today = new Date();
+          today.setHours(0,0,0,0);
+          const lastD = prev.lastGeneratedDate ? new Date(prev.lastGeneratedDate) : null;
+          if (lastD) lastD.setHours(0,0,0,0);
+
+          if (!lastD) {
+            newStreak = 1;
+          } else {
+            const diffTime = today.getTime() - lastD.getTime();
+            const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+            if (diffDays === 1) {
+              newStreak += 1;
+            } else if (diffDays > 1) {
+              newStreak = 1;
+            }
+          }
+        }
+
+        return {
+          streak: newStreak,
+          lastGeneratedDate: todayStr,
+          totalGenerated: prev.totalGenerated + 1
+        };
+      });
     } catch (error) {
       console.error(error);
       alert('Failed to generate. Please check your credentials and inputs.');
@@ -233,7 +309,8 @@ export default function App() {
         ...prev,
         ...extractedInfo
       }));
-      alert('Resume parsed successfully! Please review the pre-filled information.');
+      setResumeParsed(true);
+      setTimeout(() => setResumeParsed(false), 5000); // Reset after 5 seconds
     } catch (error: any) {
       console.error('Error parsing resume:', error);
       const message = error.message || 'Unknown error occurred';
@@ -242,6 +319,28 @@ export default function App() {
       setIsParsingResume(false);
       // Clear the input so the same file can be uploaded again if needed
       e.target.value = '';
+    }
+  };
+
+  const handleJobUrlFetch = async () => {
+    if (!jobUrl.trim()) return;
+    
+    setIsParsingJobUrl(true);
+    try {
+      const extractedInfo = await parseJobUrl(jobUrl);
+      
+      setJobInfo(prev => ({
+        ...prev,
+        ...extractedInfo
+      }));
+      setJobUrlParsed(true);
+      setTimeout(() => setJobUrlParsed(false), 5000);
+    } catch (error: any) {
+      console.error('Error parsing job URL:', error);
+      alert('Failed to extract job details from the URL. You can still fill in the details manually.');
+    } finally {
+      setIsParsingJobUrl(false);
+      setJobUrl('');
     }
   };
 
@@ -278,6 +377,22 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-4">
+          {stats.totalGenerated > 0 && (
+            <div className={cn(
+              "hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-full text-sm font-medium border", 
+              theme === 'natural' ? "bg-white/80 border-white text-olive/80 shadow-sm" : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 shadow-sm"
+            )}>
+              <div className="flex items-center gap-1.5" title="Daily Streak">
+                <Flame size={16} className={stats.streak > 0 ? "fill-orange-500 text-orange-500" : "text-gray-400 opacity-50"} />
+                <span className={stats.streak > 0 ? "text-orange-600 dark:text-orange-400" : "text-gray-400"}>{stats.streak}</span>
+              </div>
+              <div className={cn("w-[1px] h-4", theme === 'natural' ? "bg-olive/20" : "bg-gray-200 dark:bg-gray-600")} />
+              <div className="flex items-center gap-1.5" title="Total Letters Generated">
+                <Trophy size={16} className="text-blue-500" />
+                <span>{stats.totalGenerated}</span>
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-2 p-1 bg-gray-100 dark:bg-gray-800 rounded-full">
             {themes.map((t) => (
               <button
@@ -459,18 +574,29 @@ export default function App() {
                         "p-4 border-2 border-dashed rounded-xl transition-all",
                         theme === 'natural' ? "bg-olive/5 border-olive/20" : "bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700"
                       )}>
-                        <div className="flex flex-col items-center gap-3">
-                          <div className={cn("p-2 rounded-full", theme === 'natural' ? "bg-olive text-white" : "bg-blue-600 text-white")}>
-                            {isParsingResume ? <Loader2 className="size-5 animate-spin" /> : <FileUp className="size-5" />}
+                         <div className="flex flex-col items-center gap-3">
+                          <div className={cn("p-2 rounded-full transition-colors", 
+                            resumeParsed ? "bg-green-500 text-white" :
+                            theme === 'natural' ? "bg-olive text-white" : "bg-blue-600 text-white"
+                          )}>
+                            {isParsingResume ? <Loader2 className="size-5 animate-spin" /> : 
+                             resumeParsed ? <Check className="size-5" /> : 
+                             <FileUp className="size-5" />}
                           </div>
                           <div className="text-center">
-                            <p className="font-medium text-sm">Have a resume ready?</p>
-                            <p className="text-xs text-gray-500 mb-2">Upload your PDF to auto-fill the form fields.</p>
+                            <p className="font-medium text-sm">
+                              {resumeParsed ? "Resume successfully parsed!" : "Have a resume ready?"}
+                            </p>
+                            <p className={cn("text-xs mb-2 transition-colors", resumeParsed ? "text-green-600 dark:text-green-400" : "text-gray-500")}>
+                              {resumeParsed ? "Fields below have been auto-filled." : "Upload your PDF to auto-fill the form fields."}
+                            </p>
                             <label className={cn(
                               "inline-flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold cursor-pointer transition-all",
-                              theme === 'natural' 
-                                ? "bg-white border border-olive/30 text-olive hover:bg-olive hover:text-white" 
-                                : "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
+                              resumeParsed 
+                                ? "bg-green-50 text-green-700 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-400" 
+                                : theme === 'natural' 
+                                  ? "bg-white border border-olive/30 text-olive hover:bg-olive hover:text-white" 
+                                  : "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
                             )}>
                               <input 
                                 type="file" 
@@ -555,7 +681,57 @@ export default function App() {
                           />
                         </div>
                       </div>
-                      <div className="flex justify-between items-center">
+
+                      {/* Job URL Upload Section */}
+                      <div className={cn(
+                        "p-4 border-2 border-dashed rounded-xl transition-all mt-6",
+                        theme === 'natural' ? "bg-olive/5 border-olive/20" : "bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700"
+                      )}>
+                        <div className="flex flex-col items-center gap-3">
+                          <div className={cn("p-2 rounded-full transition-colors", 
+                            jobUrlParsed ? "bg-green-500 text-white" :
+                            theme === 'natural' ? "bg-olive text-white" : "bg-blue-600 text-white"
+                          )}>
+                            {isParsingJobUrl ? <Loader2 className="size-5 animate-spin" /> : 
+                             jobUrlParsed ? <Check className="size-5" /> : 
+                             <Link className="size-5" />}
+                          </div>
+                          <div className="text-center w-full max-w-md">
+                            <p className="font-medium text-sm">
+                              {jobUrlParsed ? "Job details successfully parsed!" : "Have a job posting link?"}
+                            </p>
+                            <p className={cn("text-xs mb-3 transition-colors", jobUrlParsed ? "text-green-600 dark:text-green-400" : "text-gray-500")}>
+                              {jobUrlParsed ? "Fields above have been auto-filled." : "Paste a URL to auto-fill the form fields."}
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <input 
+                                type="url" 
+                                placeholder="https://example.com/job..." 
+                                className={cn(inputStyles, "flex-1")}
+                                value={jobUrl}
+                                onChange={e => setJobUrl(e.target.value)}
+                                disabled={isParsingJobUrl}
+                              />
+                              <button 
+                                onClick={handleJobUrlFetch}
+                                disabled={isParsingJobUrl || !jobUrl.trim()}
+                                className={cn(
+                                  "px-4 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-50",
+                                  jobUrlParsed 
+                                    ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400" 
+                                    : theme === 'natural' 
+                                      ? "bg-olive text-white hover:brightness-110" 
+                                      : "bg-blue-600 text-white hover:bg-blue-700"
+                                )}
+                              >
+                                {isParsingJobUrl ? 'Fetching...' : 'Fetch'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center mt-6">
                         <button onClick={() => setStep(1)} className="text-gray-500 hover:text-gray-700 flex items-center gap-1">
                           <ChevronLeft size={18} /> Back
                         </button>

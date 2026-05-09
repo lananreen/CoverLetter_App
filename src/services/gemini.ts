@@ -157,3 +157,56 @@ export async function parseResume(resumeText: string): Promise<Partial<UserInfo>
     throw new Error("Failed to parse resume text.");
   }
 }
+
+export async function parseJobUrl(url: string): Promise<Partial<JobInfo>> {
+  try {
+    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    const response = await fetch(proxyUrl);
+    const data = await response.json();
+    let siteContent = "";
+    
+    if (data.contents) {
+      siteContent = data.contents.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                                 .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+                                 .replace(/<[^>]+>/g, ' ')
+                                 .replace(/\s+/g, ' ').substring(0, 30000); 
+    }
+
+    const prompt = `
+      Context: A user has provided a job posting URL. I need to extract key information to pre-fill a cover letter generator.
+      
+      URL: ${url}
+      SCRAPED CONTENT (might be incomplete):
+      ${siteContent}
+      
+      INSTRUCTIONS:
+      1. Extract the job title, company name, job description (summarize main responsibilities and requirements), and company culture/keywords.
+      2. If you find the company name, job title, etc. return them.
+      3. Format the response as a JSON object.
+      4. If any field is missing or cannot be determined, return an empty string.
+    `;
+
+    const aiResponse = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            jobTitle: { type: Type.STRING },
+            companyName: { type: Type.STRING },
+            jobDescription: { type: Type.STRING },
+            companyCulture: { type: Type.STRING }
+          },
+          required: ["jobTitle", "companyName", "jobDescription", "companyCulture"]
+        }
+      }
+    });
+
+    return JSON.parse(aiResponse.text || "{}");
+  } catch (error) {
+    console.error("Error parsing job URL:", error);
+    throw new Error("Failed to extract job details from URL.");
+  }
+}
