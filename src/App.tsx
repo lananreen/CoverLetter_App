@@ -323,28 +323,6 @@ export default function App() {
     }
   };
 
-  const handleJobUrlFetch = async () => {
-    if (!jobUrl.trim()) return;
-    
-    setIsParsingJobUrl(true);
-    setJobUrlError(null);
-    try {
-      const extractedInfo = await parseJobUrl(jobUrl);
-      
-      setJobInfo(prev => ({
-        ...prev,
-        ...extractedInfo
-      }));
-      setJobUrlParsed(true);
-      setTimeout(() => setJobUrlParsed(false), 5000);
-      setJobUrl('');
-    } catch (error: any) {
-      console.error('Error parsing job URL:', error);
-      setJobUrlError(error.message || 'Failed to extract job details from the URL.');
-    } finally {
-      setIsParsingJobUrl(false);
-    }
-  };
 
   const themes: { name: Theme; class: string; label: string }[] = [
     { name: 'dark', class: 'bg-gray-900 text-white', label: 'Dark' },
