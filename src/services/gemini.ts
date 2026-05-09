@@ -8,8 +8,11 @@ if (!API_KEY) {
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 export async function generateCoverLetter(userInfo: UserInfo, jobInfo: JobInfo, templateStructure: string) {
+  const currentDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   const prompt = `
     Generate a highly tailored cover letter for the following job application.
+    
+    CURRENT DATE: ${currentDate}
     
     USER INFORMATION:
     - Name: ${userInfo.fullName}
@@ -34,7 +37,7 @@ export async function generateCoverLetter(userInfo: UserInfo, jobInfo: JobInfo, 
     INSTRUCTIONS:
     1. Write a professional, effective cover letter that highlights the user's relevant skills and experience for this specific job.
     2. Adapt the language and tone to match the specified "${jobInfo.tone}" style and the company culture: "${jobInfo.companyCulture}".
-    3. Ensure the output is only the cover letter text, properly formatted with standard sections (Header at the top left, Date, Receiver Greeting, Opening, Body, Closing, Sign-off).
+    3. Ensure the output is only the cover letter text, properly formatted with standard sections (Header at the top left, Date (use CURRENT DATE), Receiver Greeting, Opening, Body, Closing, Sign-off).
     4. MUST use double newlines (double spacing) between sections and paragraphs for a clean letter layout.
     5. Ensure the entire letter is left-aligned.
     6. Focus on value proposition: why the user is the best fit for this role.
@@ -160,16 +163,35 @@ export async function parseResume(resumeText: string): Promise<Partial<UserInfo>
 
 export async function parseJobUrl(url: string): Promise<Partial<JobInfo>> {
   try {
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-    const response = await fetch(proxyUrl);
-    const data = await response.json();
     let siteContent = "";
     
-    if (data.contents) {
-      siteContent = data.contents.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    try {
+      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+      const response = await fetch(proxyUrl);
+      if (!response.ok) throw new Error("allorigins proxy failed");
+      const data = await response.json();
+      if (data.contents) {
+        siteContent = data.contents;
+      }
+    } catch (e1) {
+      console.warn("Proxy 1 failed, trying proxy 2", e1);
+      try {
+        const proxyUrl2 = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+        const response = await fetch(proxyUrl2);
+        if (!response.ok) throw new Error("corsproxy failed");
+        siteContent = await response.text();
+      } catch (e2) {
+        throw new Error("Could not fetch the URL contents. Some websites block automated parsing.");
+      }
+    }
+    
+    if (siteContent) {
+      siteContent = siteContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
                                  .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
                                  .replace(/<[^>]+>/g, ' ')
                                  .replace(/\s+/g, ' ').substring(0, 30000); 
+    } else {
+       throw new Error("The specified URL returned empty content.");
     }
 
     const prompt = `

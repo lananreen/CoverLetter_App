@@ -98,6 +98,7 @@ export default function App() {
   const [jobUrl, setJobUrl] = useState('');
   const [isParsingJobUrl, setIsParsingJobUrl] = useState(false);
   const [jobUrlParsed, setJobUrlParsed] = useState(false);
+  const [jobUrlError, setJobUrlError] = useState<string | null>(null);
   const [refinementText, setRefinementText] = useState('');
   const [theme, setTheme] = useState<Theme>('natural');
   const previewRef = useRef<HTMLDivElement>(null);
@@ -326,6 +327,7 @@ export default function App() {
     if (!jobUrl.trim()) return;
     
     setIsParsingJobUrl(true);
+    setJobUrlError(null);
     try {
       const extractedInfo = await parseJobUrl(jobUrl);
       
@@ -335,12 +337,12 @@ export default function App() {
       }));
       setJobUrlParsed(true);
       setTimeout(() => setJobUrlParsed(false), 5000);
+      setJobUrl('');
     } catch (error: any) {
       console.error('Error parsing job URL:', error);
-      alert('Failed to extract job details from the URL. You can still fill in the details manually.');
+      setJobUrlError(error.message || 'Failed to extract job details from the URL.');
     } finally {
       setIsParsingJobUrl(false);
-      setJobUrl('');
     }
   };
 
@@ -679,55 +681,6 @@ export default function App() {
                             value={jobInfo.companyCulture}
                             onChange={e => setJobInfo({...jobInfo, companyCulture: e.target.value})}
                           />
-                        </div>
-                      </div>
-
-                      {/* Job URL Upload Section */}
-                      <div className={cn(
-                        "p-4 border-2 border-dashed rounded-xl transition-all mt-6",
-                        theme === 'natural' ? "bg-olive/5 border-olive/20" : "bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700"
-                      )}>
-                        <div className="flex flex-col items-center gap-3">
-                          <div className={cn("p-2 rounded-full transition-colors", 
-                            jobUrlParsed ? "bg-green-500 text-white" :
-                            theme === 'natural' ? "bg-olive text-white" : "bg-blue-600 text-white"
-                          )}>
-                            {isParsingJobUrl ? <Loader2 className="size-5 animate-spin" /> : 
-                             jobUrlParsed ? <Check className="size-5" /> : 
-                             <Link className="size-5" />}
-                          </div>
-                          <div className="text-center w-full max-w-md">
-                            <p className="font-medium text-sm">
-                              {jobUrlParsed ? "Job details successfully parsed!" : "Have a job posting link?"}
-                            </p>
-                            <p className={cn("text-xs mb-3 transition-colors", jobUrlParsed ? "text-green-600 dark:text-green-400" : "text-gray-500")}>
-                              {jobUrlParsed ? "Fields above have been auto-filled." : "Paste a URL to auto-fill the form fields."}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <input 
-                                type="url" 
-                                placeholder="https://example.com/job..." 
-                                className={cn(inputStyles, "flex-1")}
-                                value={jobUrl}
-                                onChange={e => setJobUrl(e.target.value)}
-                                disabled={isParsingJobUrl}
-                              />
-                              <button 
-                                onClick={handleJobUrlFetch}
-                                disabled={isParsingJobUrl || !jobUrl.trim()}
-                                className={cn(
-                                  "px-4 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-50",
-                                  jobUrlParsed 
-                                    ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400" 
-                                    : theme === 'natural' 
-                                      ? "bg-olive text-white hover:brightness-110" 
-                                      : "bg-blue-600 text-white hover:bg-blue-700"
-                                )}
-                              >
-                                {isParsingJobUrl ? 'Fetching...' : 'Fetch'}
-                              </button>
-                            </div>
-                          </div>
                         </div>
                       </div>
 
