@@ -1,7 +1,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { UserInfo, JobInfo } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const API_KEY = process.env.GEMINI_API_KEY || "";
+if (!API_KEY) {
+  console.warn("GEMINI_API_KEY is not set. AI features may not work.");
+}
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 export async function generateCoverLetter(userInfo: UserInfo, jobInfo: JobInfo, templateStructure: string) {
   const prompt = `
@@ -107,5 +111,49 @@ export async function refineCoverLetter(currentContent: string, feedback: string
   } catch (error) {
     console.error("Error refining cover letter:", error);
     throw new Error("Failed to refine cover letter.");
+  }
+}
+
+export async function parseResume(resumeText: string): Promise<Partial<UserInfo>> {
+  const prompt = `
+    Context: A user has uploaded their resume text. I need to extract key information to pre-fill a cover letter generator.
+    
+    RESUME TEXT:
+    ${resumeText}
+    
+    INSTRUCTIONS:
+    1. Extract the user's full name, email, phone, location, skills, experience summary, and education summary.
+    2. Format the response as a JSON object.
+    3. If any field is missing, return an empty string for that field.
+    4. Summarize experience and education effectively for a cover letter context.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            fullName: { type: Type.STRING },
+            email: { type: Type.STRING },
+            phone: { type: Type.STRING },
+            location: { type: Type.STRING },
+            skills: { type: Type.STRING },
+            experience: { type: Type.STRING },
+            education: { type: Type.STRING }
+          },
+          required: ["fullName", "email", "phone", "location", "skills", "experience", "education"]
+        }
+      }
+    });
+
+    const data = JSON.parse(response.text || "{}");
+    return data;
+  } catch (error) {
+    console.error("Error parsing resume:", error);
+    throw new Error("Failed to parse resume text.");
   }
 }

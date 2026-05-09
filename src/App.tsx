@@ -17,12 +17,15 @@ import {
   Copy,
   PenTool,
   History,
-  Layout
+  Layout,
+  FileUp,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
 import { cn } from './lib/utils';
-import { generateCoverLetter, refineCoverLetter } from './services/gemini';
+import { generateCoverLetter, refineCoverLetter, parseResume } from './services/gemini';
+import { extractTextFromPDF } from './lib/pdfUtils';
 import { UserInfo, JobInfo, CoverLetterDraft, Theme, Template } from './types';
 
 const TEMPLATES: Template[] = [
@@ -80,6 +83,7 @@ export default function App() {
   const [currentDraft, setCurrentDraft] = useState<CoverLetterDraft | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isParsingResume, setIsParsingResume] = useState(false);
   const [refinementText, setRefinementText] = useState('');
   const [theme, setTheme] = useState<Theme>('natural');
   const previewRef = useRef<HTMLDivElement>(null);
@@ -198,6 +202,47 @@ export default function App() {
     e.stopPropagation();
     setDrafts(drafts.filter(d => d.id !== id));
     if (currentDraft?.id === id) setCurrentDraft(null);
+  };
+
+  const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf') {
+      alert('Please upload a PDF file.');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File is too large. Please upload a PDF under 10MB.');
+      return;
+    }
+
+    setIsParsingResume(true);
+    try {
+      console.log('Starting resume parsing for:', file.name);
+      const text = await extractTextFromPDF(file);
+      console.log('Extracted text length:', text.length);
+      if (!text || text.length < 50) {
+        throw new Error('Retrieved text is too short. The PDF might be an image or protected.');
+      }
+      
+      const extractedInfo = await parseResume(text);
+      
+      setUserInfo(prev => ({
+        ...prev,
+        ...extractedInfo
+      }));
+      alert('Resume parsed successfully! Please review the pre-filled information.');
+    } catch (error: any) {
+      console.error('Error parsing resume:', error);
+      const message = error.message || 'Unknown error occurred';
+      alert(`Failed to parse resume: ${message}\n\nYou can still fill in the details manually.`);
+    } finally {
+      setIsParsingResume(false);
+      // Clear the input so the same file can be uploaded again if needed
+      e.target.value = '';
+    }
   };
 
   const themes: { name: Theme; class: string; label: string }[] = [
@@ -349,6 +394,8 @@ export default function App() {
                         <h2 className={cn("text-3xl font-bold tracking-tight", theme === 'natural' && "text-gray-800")}>Tell us about yourself</h2>
                         <p className="text-gray-500">Your background helps the AI craft a personalized story.</p>
                       </div>
+
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <label className={cn("text-sm font-medium flex items-center gap-2", theme === 'natural' && "text-olive font-bold uppercase text-[10px] tracking-widest")}><User size={14}/> Full Name</label>
@@ -403,6 +450,38 @@ export default function App() {
                             value={userInfo.experience}
                             onChange={e => setUserInfo({...userInfo, experience: e.target.value})}
                           />
+                        </div>
+
+                        
+                      </div>
+                         {/* Resume Upload Section */}
+                      <div className={cn(
+                        "p-4 border-2 border-dashed rounded-xl transition-all",
+                        theme === 'natural' ? "bg-olive/5 border-olive/20" : "bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700"
+                      )}>
+                        <div className="flex flex-col items-center gap-3">
+                          <div className={cn("p-2 rounded-full", theme === 'natural' ? "bg-olive text-white" : "bg-blue-600 text-white")}>
+                            {isParsingResume ? <Loader2 className="size-5 animate-spin" /> : <FileUp className="size-5" />}
+                          </div>
+                          <div className="text-center">
+                            <p className="font-medium text-sm">Have a resume ready?</p>
+                            <p className="text-xs text-gray-500 mb-2">Upload your PDF to auto-fill the form fields.</p>
+                            <label className={cn(
+                              "inline-flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold cursor-pointer transition-all",
+                              theme === 'natural' 
+                                ? "bg-white border border-olive/30 text-olive hover:bg-olive hover:text-white" 
+                                : "bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white"
+                            )}>
+                              <input 
+                                type="file" 
+                                accept=".pdf" 
+                                className="hidden" 
+                                onChange={handleResumeUpload}
+                                disabled={isParsingResume}
+                              />
+                              {isParsingResume ? 'Parsing...' : 'Select PDF'}
+                            </label>
+                          </div>
                         </div>
                       </div>
                       <div className="flex justify-end">
